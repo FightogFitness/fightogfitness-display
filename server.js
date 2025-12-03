@@ -16,135 +16,66 @@ let appointments = [];
 function getDurationMinutes(startISO, endISO) {
   const start = new Date(startISO);
   const end = new Date(endISO);
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return undefined;
   return Math.round((end - start) / (1000 * 60));
 }
 
 /**
- * Hjælpefunktion: prøv forskellige steder i payloaden
- */
-function pickFirst(...vals) {
-  for (const v of vals) {
-    if (v !== undefined && v !== null && v !== "") return v;
-  }
-  return undefined;
-}
-
-/**
  * Webhook fra GoHighLevel
+ * Vi forventer customData fra dit webhook-step:
+ *  - appointmentId
+ *  - startTime
+ *  - endTime
+ *  - clientName
+ *  - coachName
  */
 app.post("/ghl-webhook", (req, res) => {
   const body = req.body;
+  const custom = body.customData || body.custom_data || {};
 
   console.log("Webhook payload fra GHL:", JSON.stringify(body, null, 2));
 
   try {
-    // Mange GHL-workflows sender en "appointment" inde i payloaden
-    const appt =
-      body.appointment ||
-      body.appointmentData ||
-      (body.payload && (body.payload.appointment || body.payload.appointmentData)) ||
-      {};
-
-    const contact =
-      body.contact ||
-      (body.payload && body.payload.contact) ||
-      appt.contact ||
-      {};
-
-    // ID på aftalen
-    const appointmentId = pickFirst(
-      body.appointment_id,
-      body.appointmentId,
-      appt.id,
-      body.id
-    );
-
-    // Start / slut tid – prøv mange mulige feltnavne
-    const startTime = pickFirst(
-      body.appointment_start_time,
-      body.startTime,
-      body.start_time,
-      body.start_date_time,
-      body.startDateTime,
-      appt.start_time,
-      appt.startTime,
-      appt.start_date_time,
-      appt.startDateTime
-    );
-
-    const endTime = pickFirst(
-      body.appointment_end_time,
-      body.endTime,
-      body.end_time,
-      body.end_date_time,
-      body.endDateTime,
-      appt.end_time,
-      appt.endTime,
-      appt.end_date_time,
-      appt.endDateTime
-    );
-
-    // Klientnavn
-    const clientName = pickFirst(
-      contact.name,
-      contact.full_name,
-      body.clientName,
-      body.full_name,
-      "Ukendt klient"
-    );
-
-    // Træner / assigned user
-    const coachName = pickFirst(
-      body.assigned_user_name,
-      body.assignedUserName,
-      (body.user && body.user.name),
-      (appt.user && appt.user.name),
-      body.trainerName,
-      "Coach"
-    );
-
-    // Status
-    const status = String(
-      pickFirst(
-        body.appointment_status,
-        body.status,
-        appt.status,
-        "booked"
-      )
-    ).toLowerCase();
+    const appointmentId = custom.appointmentId;
+    const startTime = custom.startTime;
+    const endTime = custom.endTime;
+    const clientName =
+      custom.clientName ||
+      (body.contact && body.contact.name) ||
+      "Ukendt klient";
+    const coachName =
+      custom.coachName ||
+      (body.user && (body.user.name || body.user.first_name)) ||
+      "Coach";
 
     if (!appointmentId || !startTime || !endTime) {
-      console.warn("Mangler felter i webhooken. Keys:", Object.keys(body));
+      console.warn("Mangler felter i customData:", custom);
       return res.status(400).json({
         success: false,
         message:
-          "Webhook modtaget, men der mangler appointmentId/startTime/endTime. Tjek logs for payload."
+          "Webhook modtaget, men der mangler appointmentId/startTime/endTime. Tjek customData i webhook-steppet."
       });
     }
 
-    if (["cancelled", "canceled", "no_show"].includes(status)) {
-      appointments = appointments.filter((a) => a.id !== appointmentId);
-      console.log("Aftale fjernet (status):", appointmentId, status);
+    const durationMinutes = getDurationMinutes(startTime, endTime);
+
+    const newAppt = {
+      id: appointmentId,
+      clientName,
+      coachName,
+      startTime,
+      endTime,
+      durationMinutes
+    };
+
+    // Opdater eller tilføj aftale
+    const existingIndex = appointments.findIndex((a) => a.id === appointmentId);
+    if (existingIndex >= 0) {
+      appointments[existingIndex] = newAppt;
+      console.log("Aftale opdateret:", appointmentId);
     } else {
-      const durationMinutes = getDurationMinutes(startTime, endTime);
-
-      const newAppt = {
-        id: appointmentId,
-        clientName,
-        coachName,
-        startTime,
-        endTime,
-        durationMinutes
-      };
-
-      const existingIndex = appointments.findIndex((a) => a.id === appointmentId);
-      if (existingIndex >= 0) {
-        appointments[existingIndex] = newAppt;
-        console.log("Aftale opdateret:", appointmentId);
-      } else {
-        appointments.push(newAppt);
-        console.log("Aftale tilføjet:", appointmentId);
-      }
+      appointments.push(newAppt);
+      console.log("Aftale tilføjet:", appointmentId);
     }
 
     return res.json({ success: true });
@@ -161,7 +92,10 @@ app.get("/api/appointments", (req, res) => {
   const now = new Date();
 
   const upcoming = appointments
-    .filter((a) => new Date(a.startTime) >= now)
+    .filter((a) => {
+      const start = new Date(a.startTime);
+      return !isNaN(start.getTime()) && start >= now;
+    })
     .sort((a, b) => new Date(a.startTime) - new Date(b.startTime))
     .slice(0, 20);
 
