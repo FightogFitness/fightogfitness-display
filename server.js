@@ -7,7 +7,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// In-memory database
+// In-memory "database"
 let appointments = [];
 
 /**
@@ -21,57 +21,81 @@ function getDurationMinutes(startISO, endISO) {
 }
 
 /**
- * WEBHOOK: GHL sender data hertil
- * Vi bruger KUN customData nu.
+ * WEBHOOK fra GoHighLevel
+ * Matcher din payload 1:1
  */
 app.post("/ghl-webhook", (req, res) => {
-  console.log("FULL PAYLOAD FROM GHL:", JSON.stringify(req.body, null, 2));
-
   const body = req.body;
-  const custom = body.customData || {};
+  console.log("FULL PAYLOAD FROM GHL:", JSON.stringify(body, null, 2));
 
-  const appointmentId = custom.appointmentId;
-  const startTime = custom.startTime;
-  const endTime = custom.endTime;
-  const clientName = custom.clientName || "Ukendt klient";
-  const coachName = custom.coachName || "Coach";
+  try {
+    const custom = body.customData || {};
+    const calendar = body.calendar || {};
+    const user = body.user || {};
 
-  if (!appointmentId || !startTime || !endTime) {
-    console.log("CUSTOMDATA MODTAGET:", custom); // debug
-    return res.status(400).json({
-      success: false,
-      message:
-        "Webhook modtaget, men der mangler appointmentId/startTime/endTime."
-    });
+    // ID + tider tager vi fra calendar/customData
+    const appointmentId =
+      custom.appointmentId ||
+      calendar.appointmentId ||
+      body.contact_id; // fallback
+
+    const startTime =
+      calendar.startTime || custom.startTime; // vi foretrækker calendar med dato
+
+    const endTime =
+      calendar.endTime || custom.endTime;
+
+    // Klientnavn – du har full_name tomt, så vi falder tilbage til email / contact_id
+    const clientName =
+      custom.clientName ||
+      body.full_name ||
+      body.email ||
+      body.contact_id ||
+      "Ukendt klient";
+
+    // Trænernavn – virker i din payload
+    const coachName =
+      custom.coachName ||
+      user.firstName ||
+      "Coach";
+
+    if (!appointmentId || !startTime || !endTime) {
+      console.log("Mangler felter. appointmentId:", appointmentId, "startTime:", startTime, "endTime:", endTime);
+      return res.status(400).json({
+        success: false,
+        message: "Webhook modtaget, men der mangler appointmentId/startTime/endTime."
+      });
+    }
+
+    const durationMinutes = getDurationMinutes(startTime, endTime);
+
+    const newAppt = {
+      id: appointmentId,
+      clientName,
+      coachName,
+      startTime,
+      endTime,
+      durationMinutes
+    };
+
+    const index = appointments.findIndex((a) => a.id === appointmentId);
+    if (index >= 0) {
+      appointments[index] = newAppt;
+      console.log("Aftale opdateret:", appointmentId);
+    } else {
+      appointments.push(newAppt);
+      console.log("Aftale tilføjet:", appointmentId);
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("Fejl i webhook-handler:", err);
+    return res.status(500).json({ success: false, error: "Serverfejl i webhook" });
   }
-
-  const durationMinutes = getDurationMinutes(startTime, endTime);
-
-  const newAppt = {
-    id: appointmentId,
-    clientName,
-    coachName,
-    startTime,
-    endTime,
-    durationMinutes
-  };
-
-  const index = appointments.findIndex((a) => a.id === appointmentId);
-
-  if (index >= 0) {
-    appointments[index] = newAppt;
-    console.log("Aftale opdateret:", appointmentId);
-  } else {
-    appointments.push(newAppt);
-    console.log("Aftale tilføjet:", appointmentId);
-  }
-
-  return res.json({ success: true });
 });
 
 /**
- * API endpoint der viser ALLE appointments (for debugging)
- * Ikke kun kommende.
+ * API – lige nu viser vi ALLE aftaler (til debugging)
  */
 app.get("/api/appointments", (req, res) => {
   console.log("Sender appointments:", appointments);
@@ -79,7 +103,7 @@ app.get("/api/appointments", (req, res) => {
 });
 
 /**
- * DISPLAY-siden
+ * DISPLAY-side
  */
 app.get("/display", (req, res) => {
   const html = `
@@ -138,7 +162,7 @@ app.get("/display", (req, res) => {
 
         const content = document.getElementById("content");
 
-        if (data.length === 0) {
+        if (!data || data.length === 0) {
           content.innerHTML = '<div style="margin-top:20px;color:#aaa;font-size:22px;">Ingen kommende personlige træninger.</div>';
           return;
         }
