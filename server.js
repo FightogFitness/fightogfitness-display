@@ -4,15 +4,14 @@ import cors from "cors";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
 app.use(cors());
-app.use(express.json()); // så vi kan læse JSON fra GHL
+app.use(express.json());
 
-// Simpel "database" i hukommelsen (nulstilles hvis server genstartes)
+// Simpel in-memory "database"
 let appointments = [];
 
 /**
- * Beregn varighed i minutter mellem start og slut
+ * Beregn varighed i minutter
  */
 function getDurationMinutes(startISO, endISO) {
   const start = new Date(startISO);
@@ -21,63 +20,111 @@ function getDurationMinutes(startISO, endISO) {
 }
 
 /**
- * Webhook endpoint til GoHighLevel
- * URL i GHL bliver: https://DIT-RENDER-DOMÆNE/ghl-webhook
+ * Hjælpefunktion: prøv forskellige steder i payloaden
+ */
+function pickFirst(...vals) {
+  for (const v of vals) {
+    if (v !== undefined && v !== null && v !== "") return v;
+  }
+  return undefined;
+}
+
+/**
+ * Webhook fra GoHighLevel
  */
 app.post("/ghl-webhook", (req, res) => {
   const body = req.body;
 
-  // Log hele payloaden, så vi kan se præcis hvad GHL sender
   console.log("Webhook payload fra GHL:", JSON.stringify(body, null, 2));
 
   try {
+    // Mange GHL-workflows sender en "appointment" inde i payloaden
+    const appt =
+      body.appointment ||
+      body.appointmentData ||
+      (body.payload && (body.payload.appointment || body.payload.appointmentData)) ||
+      {};
+
+    const contact =
+      body.contact ||
+      (body.payload && body.payload.contact) ||
+      appt.contact ||
+      {};
+
     // ID på aftalen
-    const appointmentId = body.id || body.appointmentId || body.appointment_id;
+    const appointmentId = pickFirst(
+      body.appointment_id,
+      body.appointmentId,
+      appt.id,
+      body.id
+    );
 
-    // Status (booked, cancelled, osv.)
-    const status = (body.status || body.appointmentStatus || "booked").toLowerCase();
+    // Start / slut tid – prøv mange mulige feltnavne
+    const startTime = pickFirst(
+      body.appointment_start_time,
+      body.startTime,
+      body.start_time,
+      body.start_date_time,
+      body.startDateTime,
+      appt.start_time,
+      appt.startTime,
+      appt.start_date_time,
+      appt.startDateTime
+    );
 
-    // Start og slut – forskellige navne afhængigt af GHL
-    const startTime =
-      body.appointment_start_time ||
-      body.startTime ||
-      body.start_time ||
-      body.appointmentStartTime;
-
-    const endTime =
-      body.appointment_end_time ||
-      body.endTime ||
-      body.end_time ||
-      body.appointmentEndTime;
+    const endTime = pickFirst(
+      body.appointment_end_time,
+      body.endTime,
+      body.end_time,
+      body.end_date_time,
+      body.endDateTime,
+      appt.end_time,
+      appt.endTime,
+      appt.end_date_time,
+      appt.endDateTime
+    );
 
     // Klientnavn
-    const clientName =
-      (body.contact && (body.contact.name || body.contact.full_name)) ||
-      body.clientName ||
-      body.full_name ||
-      "Ukendt klient";
+    const clientName = pickFirst(
+      contact.name,
+      contact.full_name,
+      body.clientName,
+      body.full_name,
+      "Ukendt klient"
+    );
 
     // Træner / assigned user
-    const coachName =
-      body.assigned_user_name ||
-      (body.user && body.user.name) ||
-      body.assignedUserName ||
-      body.trainerName ||
-      "Coach";
+    const coachName = pickFirst(
+      body.assigned_user_name,
+      body.assignedUserName,
+      (body.user && body.user.name),
+      (appt.user && appt.user.name),
+      body.trainerName,
+      "Coach"
+    );
+
+    // Status
+    const status = String(
+      pickFirst(
+        body.appointment_status,
+        body.status,
+        appt.status,
+        "booked"
+      )
+    ).toLowerCase();
 
     if (!appointmentId || !startTime || !endTime) {
-      console.warn("Mangler vigtige felter i webhooken.");
+      console.warn("Mangler felter i webhooken. Keys:", Object.keys(body));
       return res.status(400).json({
         success: false,
         message:
-          "Webhook modtaget, men der mangler appointmentId/startTime/endTime. Tjek felt-navne i server.js."
+          "Webhook modtaget, men der mangler appointmentId/startTime/endTime. Tjek logs for payload."
       });
     }
 
-    // Hvis aftalen er aflyst / no-show → fjern den fra listen
     if (["cancelled", "canceled", "no_show"].includes(status)) {
       appointments = appointments.filter((a) => a.id !== appointmentId);
-      console.log("Aftale aflyst/fjernet:", appointmentId);
+      console.log("Aftale fjernet (status):", appointmentId, status);
     } else {
       const durationMinutes = getDurationMinutes(startTime, endTime);
 
@@ -90,27 +137,25 @@ app.post("/ghl-webhook", (req, res) => {
         durationMinutes
       };
 
-      // Hvis aftalen findes, opdater den – ellers tilføj
       const existingIndex = appointments.findIndex((a) => a.id === appointmentId);
       if (existingIndex >= 0) {
         appointments[existingIndex] = newAppt;
-        console.log("Opdaterede aftale:", appointmentId);
+        console.log("Aftale opdateret:", appointmentId);
       } else {
         appointments.push(newAppt);
-        console.log("Tilføjede ny aftale:", appointmentId);
+        console.log("Aftale tilføjet:", appointmentId);
       }
     }
 
     return res.json({ success: true });
   } catch (err) {
-    console.error("Fejl i webhook:", err);
+    console.error("Fejl i webhook-handler:", err);
     return res.status(500).json({ success: false, error: "Serverfejl i webhook" });
   }
 });
 
 /**
- * JSON API til kommende aftaler
- * Kan bruges til debugging: /api/appointments
+ * API til kommende aftaler
  */
 app.get("/api/appointments", (req, res) => {
   const now = new Date();
@@ -118,14 +163,13 @@ app.get("/api/appointments", (req, res) => {
   const upcoming = appointments
     .filter((a) => new Date(a.startTime) >= now)
     .sort((a, b) => new Date(a.startTime) - new Date(b.startTime))
-    .slice(0, 20); // max 20 ad gangen
+    .slice(0, 20);
 
   res.json(upcoming);
 });
 
 /**
- * TV-display side
- * Dette er URL'en du bruger på dit TV: /display
+ * TV-display
  */
 app.get("/display", (req, res) => {
   const html = `
@@ -143,62 +187,29 @@ app.get("/display", (req, res) => {
         background: #050816;
         color: #f9fafb;
       }
-      .wrapper {
-        padding: 32px;
-      }
+      .wrapper { padding: 32px; }
       h1 {
         font-size: 42px;
         margin: 0 0 8px;
         text-transform: uppercase;
         letter-spacing: 2px;
       }
-      .subtitle {
-        font-size: 18px;
-        color: #9ca3af;
-        margin-bottom: 24px;
-      }
-      .time {
-        font-size: 18px;
-        color: #e5e7eb;
-        margin-bottom: 24px;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 8px;
-      }
-      th, td {
-        padding: 14px 12px;
-        text-align: left;
-      }
+      .subtitle { font-size: 18px; color: #9ca3af; margin-bottom: 24px; }
+      .time { font-size: 18px; color: #e5e7eb; margin-bottom: 24px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { padding: 14px 12px; text-align: left; }
       th {
         font-size: 16px;
         text-transform: uppercase;
         letter-spacing: 1px;
         border-bottom: 2px solid #374151;
       }
-      tr:nth-child(even) {
-        background: rgba(15, 23, 42, 0.80);
-      }
-      tr:nth-child(odd) {
-        background: rgba(15, 23, 42, 0.55);
-      }
-      td {
-        font-size: 18px;
-      }
-      .client {
-        font-weight: 600;
-        font-size: 20px;
-      }
-      .coach {
-        color: #a5b4fc;
-        font-weight: 500;
-      }
-      .no-data {
-        font-size: 22px;
-        margin-top: 32px;
-        color: #9ca3af;
-      }
+      tr:nth-child(even) { background: rgba(15, 23, 42, 0.80); }
+      tr:nth-child(odd) { background: rgba(15, 23, 42, 0.55); }
+      td { font-size: 18px; }
+      .client { font-weight: 600; font-size: 20px; }
+      .coach { color: #a5b4fc; font-weight: 500; }
+      .no-data { font-size: 22px; margin-top: 32px; color: #9ca3af; }
       .badge {
         display: inline-block;
         padding: 4px 10px;
@@ -216,9 +227,8 @@ app.get("/display", (req, res) => {
     <div class="wrapper">
       <div class="badge">FightogFitness</div>
       <h1>Kommende Personlige Træninger</h1>
-      <div class="subtitle">Næste bookinger i kalenderen (trigger: "personlig træning" i GHL)</div>
+      <div class="subtitle">Live fra GoHighLevel (kalender: "Personlig Træning")</div>
       <div class="time">Senest opdateret: <span id="now"></span></div>
-
       <div id="content"></div>
     </div>
 
@@ -228,8 +238,7 @@ app.get("/display", (req, res) => {
           const res = await fetch("/api/appointments");
           const data = await res.json();
 
-          const nowEl = document.getElementById("now");
-          nowEl.textContent = new Date().toLocaleString("da-DK", {
+          document.getElementById("now").textContent = new Date().toLocaleString("da-DK", {
             hour: "2-digit",
             minute: "2-digit",
             day: "2-digit",
@@ -240,7 +249,7 @@ app.get("/display", (req, res) => {
           const content = document.getElementById("content");
 
           if (!data || data.length === 0) {
-            content.innerHTML = '<div class="no-data">Ingen kommende personlige træninger i kalenderen.</div>';
+            content.innerHTML = '<div class="no-data">Ingen kommende personlige træninger.</div>';
             return;
           }
 
@@ -249,16 +258,8 @@ app.get("/display", (req, res) => {
             const start = new Date(a.startTime);
             const end = new Date(a.endTime);
 
-            const startStr = start.toLocaleTimeString("da-DK", {
-              hour: "2-digit",
-              minute: "2-digit"
-            });
-
-            const endStr = end.toLocaleTimeString("da-DK", {
-              hour: "2-digit",
-              minute: "2-digit"
-            });
-
+            const startStr = start.toLocaleTimeString("da-DK", { hour: "2-digit", minute: "2-digit" });
+            const endStr = end.toLocaleTimeString("da-DK", { hour: "2-digit", minute: "2-digit" });
             const dayStr = start.toLocaleDateString("da-DK", {
               weekday: "short",
               day: "2-digit",
@@ -307,7 +308,6 @@ app.get("/display", (req, res) => {
   res.send(html);
 });
 
-// Start serveren
 app.listen(PORT, () => {
   console.log("Server kører på port " + PORT);
 });
