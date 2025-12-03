@@ -25,8 +25,6 @@ function getDurationMinutes(startISO, endISO) {
  *
  * Workflow 1 (book/opdater) sender customData:
  *  - appointmentId
- *  - startTime
- *  - endTime
  *  - clientName
  *  - coachName
  *  - isCancelled = false
@@ -34,6 +32,8 @@ function getDurationMinutes(startISO, endISO) {
  * Workflow 2 (cancel) sender:
  *  - appointmentId
  *  - isCancelled = true
+ *
+ * startTime og endTime tager vi fra body.calendar.startTime / endTime
  */
 app.post("/ghl-webhook", (req, res) => {
   const body = req.body;
@@ -44,21 +44,32 @@ app.post("/ghl-webhook", (req, res) => {
     const calendar = body.calendar || {};
     const user = body.user || {};
 
-    // Læs flag fra customData
+    // Flag fra customData
     const isCancelledFlag = String(custom.isCancelled || "").toLowerCase().trim();
     const isCancelled =
       isCancelledFlag === "true" ||
       isCancelledFlag === "1" ||
       isCancelledFlag === "yes";
 
-    // ID + tider
+    // ID
     const appointmentId =
       custom.appointmentId ||
       calendar.appointmentId ||
-      body.contact_id;
+      body.contact_id ||
+      body.contactId;
 
-    const startTime = calendar.startTime || custom.startTime;
-    const endTime = calendar.endTime || custom.endTime;
+    if (!appointmentId) {
+      console.log("Mangler appointmentId, gemmer ikke aftale.");
+      return res.json({ success: false, message: "Ingen appointmentId" });
+    }
+
+    // Tider: tag altid fra calendar først
+    let startTime = calendar.startTime || custom.startTime;
+    let endTime = calendar.endTime || custom.endTime;
+
+    // Fallback hvis GHL en dag ændrer felter
+    if (!startTime && body.startTime) startTime = body.startTime;
+    if (!endTime && body.endTime) endTime = body.endTime;
 
     const clientName =
       custom.clientName ||
@@ -72,47 +83,45 @@ app.post("/ghl-webhook", (req, res) => {
       user.firstName ||
       "Coach";
 
-    if (!appointmentId) {
-      console.log("Mangler appointmentId");
-      return res.status(400).json({
-        success: false,
-        message: "Webhook modtaget, men der mangler appointmentId."
-      });
-    }
-
     // Find eksisterende aftale
     const index = appointments.findIndex((a) => a.id === appointmentId);
 
-    // Hvis isCancelled = true → markér rød
+    // CANCEL-FLOW: markér som cancelled (rød)
     if (isCancelled) {
       if (index >= 0) {
         appointments[index].status = "cancelled";
-        console.log("Aftale markeret som CANCELLED:", appointmentId, "flag:", isCancelledFlag);
+        console.log("Aftale markeret som CANCELLED:", appointmentId);
       } else {
+        const dummyStart = startTime || new Date().toISOString();
+        const dummyEnd =
+          endTime ||
+          new Date(new Date(dummyStart).getTime() + 30 * 60000).toISOString();
+
         const dummyAppt = {
           id: appointmentId,
           clientName,
           coachName,
-          startTime: startTime || new Date().toISOString(),
-          endTime: endTime || new Date().toISOString(),
-          durationMinutes:
-            startTime && endTime ? getDurationMinutes(startTime, endTime) : undefined,
+          startTime: dummyStart,
+          endTime: dummyEnd,
+          durationMinutes: getDurationMinutes(dummyStart, dummyEnd),
           status: "cancelled"
         };
         appointments.push(dummyAppt);
-        console.log("Aflyst aftale oprettet som CANCELLED:", appointmentId);
+        console.log("Aflyst aftale oprettet som CANCELLED (dummy tider):", appointmentId);
       }
 
       return res.json({ success: true, cancelled: true });
     }
 
-    // Ellers: almindelig (grøn) aftale
-    if (!startTime || !endTime) {
-      console.log("Mangler startTime/endTime for ikke-aflyst aftale:", appointmentId);
-      return res.status(400).json({
-        success: false,
-        message: "Webhook modtaget uden startTime/endTime."
-      });
+    // BOOK/OPDATER-FLOW (grøn)
+    // Hvis tider mangler, brug "nu" + 30 min som fallback, så vi IKKE breaker
+    if (!startTime) {
+      startTime = new Date().toISOString();
+      console.log("Mangler startTime, bruger nu som fallback for:", appointmentId);
+    }
+    if (!endTime) {
+      endTime = new Date(new Date(startTime).getTime() + 30 * 60000).toISOString();
+      console.log("Mangler endTime, bruger start + 30 min som fallback for:", appointmentId);
     }
 
     const durationMinutes = getDurationMinutes(startTime, endTime);
@@ -270,4 +279,3 @@ app.get("/display", (req, res) => {
 app.listen(PORT, () => {
   console.log("Server kører på port " + PORT);
 });
-
