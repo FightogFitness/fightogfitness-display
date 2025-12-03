@@ -25,7 +25,7 @@ function getDurationMinutes(startISO, endISO) {
  *
  * Workflow 1 (book/opdater) sender customData:
  *  - appointmentId
- *  - startTime (fx calendar.startTime)
+ *  - startTime
  *  - endTime
  *  - clientName
  *  - coachName
@@ -44,8 +44,8 @@ app.post("/ghl-webhook", (req, res) => {
     const calendar = body.calendar || {};
     const user = body.user || {};
 
-    // Flag fra customData (true/false)
-    const isCancelledFlag = String(custom.isCancelled || "").toLowerCase();
+    // Læs flag fra customData
+    const isCancelledFlag = String(custom.isCancelled || "").toLowerCase().trim();
     const isCancelled =
       isCancelledFlag === "true" ||
       isCancelledFlag === "1" ||
@@ -55,12 +55,11 @@ app.post("/ghl-webhook", (req, res) => {
     const appointmentId =
       custom.appointmentId ||
       calendar.appointmentId ||
-      body.contact_id; // fallback, bare så der er noget
+      body.contact_id;
 
     const startTime = calendar.startTime || custom.startTime;
     const endTime = calendar.endTime || custom.endTime;
 
-    // Klientnavn
     const clientName =
       custom.clientName ||
       body.full_name ||
@@ -68,19 +67,10 @@ app.post("/ghl-webhook", (req, res) => {
       body.contact_id ||
       "Ukendt klient";
 
-    // Trænernavn
     const coachName =
       custom.coachName ||
       user.firstName ||
       "Coach";
-
-    // Statusindikator fra kalender (ekstra info)
-    const rawStatus = String(
-      calendar.status ||
-      calendar.appoinmentStatus ||
-      body.status ||
-      ""
-    ).toLowerCase();
 
     if (!appointmentId) {
       console.log("Mangler appointmentId");
@@ -90,16 +80,15 @@ app.post("/ghl-webhook", (req, res) => {
       });
     }
 
-    // Find eksisterende aftale hvis den allerede er gemt
+    // Find eksisterende aftale
     const index = appointments.findIndex((a) => a.id === appointmentId);
 
-    // Hvis webhooket kommer fra CANCEL-workflowet
-    if (isCancelled || rawStatus.includes("cancel")) {
+    // Hvis isCancelled = true → markér rød
+    if (isCancelled) {
       if (index >= 0) {
         appointments[index].status = "cancelled";
-        console.log("Aftale markeret som CANCELLED:", appointmentId);
+        console.log("Aftale markeret som CANCELLED:", appointmentId, "flag:", isCancelledFlag);
       } else {
-        // Hvis vi aldrig har set aftalen før, men får cancel først
         const dummyAppt = {
           id: appointmentId,
           clientName,
@@ -117,7 +106,7 @@ app.post("/ghl-webhook", (req, res) => {
       return res.json({ success: true, cancelled: true });
     }
 
-    // Book/opdater normal aftale (ikke aflyst)
+    // Ellers: almindelig (grøn) aftale
     if (!startTime || !endTime) {
       console.log("Mangler startTime/endTime for ikke-aflyst aftale:", appointmentId);
       return res.status(400).json({
@@ -154,8 +143,7 @@ app.post("/ghl-webhook", (req, res) => {
 });
 
 /**
- * API – kun KOMMENDE aftaler (både aktive og aflyste)
- * Ingenting forsvinder pga. aflysning – kun hvis endTime er i fortiden.
+ * API – kun kommende aftaler (endTime >= nu)
  */
 app.get("/api/appointments", (req, res) => {
   const now = new Date();
@@ -173,8 +161,6 @@ app.get("/api/appointments", (req, res) => {
 
 /**
  * DISPLAY-side
- * Grøn række = aktiv
- * Rød række = aflyst
  */
 app.get("/display", (req, res) => {
   const html = `
@@ -284,3 +270,4 @@ app.get("/display", (req, res) => {
 app.listen(PORT, () => {
   console.log("Server kører på port " + PORT);
 });
+
