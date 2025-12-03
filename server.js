@@ -21,6 +21,17 @@ function getDurationMinutes(startISO, endISO) {
 }
 
 /**
+ * Ryd gamle aftaler (alt hvor slut-tid er før nu)
+ */
+function cleanupOldAppointments() {
+  const now = new Date();
+  appointments = appointments.filter((a) => {
+    const end = new Date(a.endTime);
+    return !isNaN(end.getTime()) && end >= now;
+  });
+}
+
+/**
  * WEBHOOK fra GoHighLevel
  *
  * Workflow 1 (book/opdater) sender customData:
@@ -40,6 +51,8 @@ app.post("/ghl-webhook", (req, res) => {
   console.log("FULL PAYLOAD FROM GHL:", JSON.stringify(body, null, 2));
 
   try {
+    cleanupOldAppointments();
+
     const custom = body.customData || {};
     const calendar = body.calendar || {};
     const user = body.user || {};
@@ -67,7 +80,7 @@ app.post("/ghl-webhook", (req, res) => {
     let startTime = calendar.startTime || custom.startTime;
     let endTime = calendar.endTime || custom.endTime;
 
-    // Fallback hvis GHL en dag ændrer felter
+    // Fallback hvis GHL ændrer felter
     if (!startTime && body.startTime) startTime = body.startTime;
     if (!endTime && body.endTime) endTime = body.endTime;
 
@@ -113,8 +126,7 @@ app.post("/ghl-webhook", (req, res) => {
       return res.json({ success: true, cancelled: true });
     }
 
-    // BOOK/OPDATER-FLOW (grøn)
-    // Hvis tider mangler, brug "nu" + 30 min som fallback, så vi IKKE breaker
+    // BOOK/OPDATER-FLOW (grøn/blå)
     if (!startTime) {
       startTime = new Date().toISOString();
       console.log("Mangler startTime, bruger nu som fallback for:", appointmentId);
@@ -155,6 +167,8 @@ app.post("/ghl-webhook", (req, res) => {
  * API – kun kommende aftaler (endTime >= nu)
  */
 app.get("/api/appointments", (req, res) => {
+  cleanupOldAppointments();
+
   const now = new Date();
 
   const upcoming = appointments
@@ -170,6 +184,9 @@ app.get("/api/appointments", (req, res) => {
 
 /**
  * DISPLAY-side
+ * - Blå rækker = aktive
+ * - Røde rækker = aflyste
+ * - Øverst: "Næste i ringen" kort for data[0]
  */
 app.get("/display", (req, res) => {
   const html = `
@@ -183,28 +200,65 @@ app.get("/display", (req, res) => {
       body {
         margin: 0;
         font-family: system-ui, sans-serif;
-        background: #050816;
+        background: #020617; /* meget mørk blå */
         color: #f9fafb;
       }
       .wrapper { padding: 32px; }
       .badge {
         display: inline-block;
         padding: 6px 12px;
-        border: 1px solid #4b5563;
+        border: 1px solid #1d4ed8;
         border-radius: 999px;
         margin-bottom: 12px;
-        color: #d1d5db;
+        color: #bfdbfe;
+        font-size: 14px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
       }
       h1 {
-        font-size: 40px;
+        font-size: 42px;
         margin: 0 0 5px;
       }
-      .subtitle { color: #9ca3af; margin-bottom: 20px; }
-      .time { color: #ccc; margin-bottom: 20px; }
+      .subtitle { color: #9ca3af; margin-bottom: 16px; }
+      .time { color: #e5e7eb; margin-bottom: 24px; }
 
-      table { width: 100%; border-collapse: collapse; }
-      th, td { padding: 12px; text-align: left; font-size: 18px; }
-      th { border-bottom: 2px solid #374151; text-transform: uppercase; }
+      .next-card {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 16px 20px;
+        border-radius: 16px;
+        margin-bottom: 24px;
+        background: linear-gradient(135deg, #1d4ed8, #0f172a);
+        box-shadow: 0 18px 40px rgba(15,23,42,0.6);
+      }
+      .next-title {
+        font-size: 18px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #bfdbfe;
+      }
+      .next-name {
+        font-size: 28px;
+        font-weight: 600;
+      }
+      .next-meta {
+        font-size: 18px;
+        color: #e5e7eb;
+      }
+      .next-cancelled {
+        background: linear-gradient(135deg, #b91c1c, #450a0a);
+      }
+
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { padding: 12px; text-align: left; font-size: 16px; }
+      th {
+        border-bottom: 2px solid #1f2937;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #e5e7eb;
+        font-size: 14px;
+      }
     </style>
   </head>
   <body>
@@ -213,6 +267,7 @@ app.get("/display", (req, res) => {
       <h1>Kommende Personlige Træninger</h1>
       <div class="subtitle">Live fra GHL kalender: "Personlig Træning"</div>
       <div class="time">Senest opdateret: <span id="now"></span></div>
+      <div id="next"></div>
       <div id="content"></div>
     </div>
 
@@ -224,25 +279,60 @@ app.get("/display", (req, res) => {
         document.getElementById("now").textContent = new Date().toLocaleString("da-DK");
 
         const content = document.getElementById("content");
+        const nextEl = document.getElementById("next");
 
         if (!data || data.length === 0) {
+          nextEl.innerHTML = "";
           content.innerHTML = '<div style="margin-top:20px;color:#aaa;font-size:22px;">Ingen kommende personlige træninger.</div>';
           return;
         }
 
+        const next = data[0];
+        const rest = data.slice(1);
+
+        // Format-funktioner
+        function fmtDate(d) {
+          return d.toLocaleDateString("da-DK");
+        }
+        function fmtTime(d) {
+          return d.toLocaleTimeString("da-DK", { hour: "2-digit", minute: "2-digit" });
+        }
+
+        // NÆSTE I RINGEN kort
+        const nextStart = new Date(next.startTime);
+        const nextEnd = new Date(next.endTime);
+        const nextCancelled = next.status === "cancelled";
+
+        const nextDate = fmtDate(nextStart);
+        const nextTime = fmtTime(nextStart) + " - " + fmtTime(nextEnd);
+
+        nextEl.innerHTML = \`
+          <div class="next-card \${nextCancelled ? "next-cancelled" : ""}">
+            <div class="next-title">Næste i ringen</div>
+            <div class="next-name">\${next.clientName} \${nextCancelled ? "(Aflyst)" : ""}</div>
+            <div class="next-meta">\${nextDate} · \${nextTime} · Træner: \${next.coachName}</div>
+          </div>
+        \`;
+
+        // Resten i tabel
+        if (rest.length === 0) {
+          content.innerHTML = "";
+          return;
+        }
+
         let rows = "";
-        data.forEach((a) => {
+        rest.forEach((a) => {
           const s = new Date(a.startTime);
           const e = new Date(a.endTime);
           const cancelled = a.status === "cancelled";
 
-          const bgColor = cancelled ? "#7f1d1d" : "#064e3b"; // rød / grøn
+          const bgColor = cancelled ? "#7f1d1d" : "#1d4ed8"; // rød / blå
           const statusLabel = cancelled ? "Aflyst" : (a.durationMinutes || "") + " min";
 
           rows += \`
             <tr style="background-color: \${bgColor};">
-              <td>\${s.toLocaleDateString("da-DK")}</td>
-              <td>\${s.toLocaleTimeString("da-DK")} - \${e.toLocaleTimeString("da-DK")}</td>
+              <td>\${fmtDate(s)}</td>
+              <td>\${fmtTime(s)} - \${fmtTime(e)}</td>
               <td>\${a.clientName} \${cancelled ? "(Aflyst)" : ""}</td>
               <td>\${a.coachName}</td>
               <td>\${statusLabel}</td>
