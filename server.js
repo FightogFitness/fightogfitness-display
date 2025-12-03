@@ -22,6 +22,19 @@ function getDurationMinutes(startISO, endISO) {
 
 /**
  * WEBHOOK fra GoHighLevel
+ * Matcher din payload-struktur + customData fra workflows
+ *
+ * Workflow 1 (book/opdater):
+ *  - appointmentId
+ *  - startTime (fx calendar.startTime)
+ *  - endTime
+ *  - clientName
+ *  - coachName
+ *  - isCancelled = false
+ *
+ * Workflow 2 (cancel):
+ *  - appointmentId
+ *  - isCancelled = true
  */
 app.post("/ghl-webhook", (req, res) => {
   const body = req.body;
@@ -32,18 +45,23 @@ app.post("/ghl-webhook", (req, res) => {
     const calendar = body.calendar || {};
     const user = body.user || {};
 
-    // ID + tider tager vi fra calendar/customData
+    // Flag fra customData (true/false)
+    const isCancelledFlag = String(custom.isCancelled || "").toLowerCase();
+    const isCancelled =
+      isCancelledFlag === "true" ||
+      isCancelledFlag === "1" ||
+      isCancelledFlag === "yes";
+
+    // ID + tider
     const appointmentId =
       custom.appointmentId ||
       calendar.appointmentId ||
       body.contact_id; // fallback
 
-    const startTime =
-      calendar.startTime || custom.startTime;
+    const startTime = calendar.startTime || custom.startTime; // vi foretrækker calendar (har dato)
+    const endTime = calendar.endTime || custom.endTime;
 
-    const endTime =
-      calendar.endTime || custom.endTime;
-
+    // Klientnavn
     const clientName =
       custom.clientName ||
       body.full_name ||
@@ -51,12 +69,13 @@ app.post("/ghl-webhook", (req, res) => {
       body.contact_id ||
       "Ukendt klient";
 
+    // Trænernavn
     const coachName =
       custom.coachName ||
       user.firstName ||
       "Coach";
 
-    // Læs status (til at opdage aflysninger)
+    // Status fra calendar/body (kan bruges som ekstra signal)
     const rawStatus = String(
       calendar.status ||
       calendar.appoinmentStatus ||
@@ -72,14 +91,33 @@ app.post("/ghl-webhook", (req, res) => {
       });
     }
 
-    // Hvis aftalen er aflyst → fjern den fra listen
-    if (rawStatus.includes("cancel")) {
-      appointments = appointments.filter((a) => a.id !== appointmentId);
-      console.log("Aftale AFSLYST og fjernet:", appointmentId, "status:", rawStatus);
-      return res.json({ success: true, removed: true });
+    // 1) AFLYST: marker som cancelled (fjern ikke)
+    if (isCancelled || rawStatus.includes("cancel")) {
+      const index = appointments.findIndex((a) => a.id === appointmentId);
+
+      if (index >= 0) {
+        // markér eksisterende aftale som aflyst
+        appointments[index].status = "cancelled";
+        console.log("Aftale markeret som CANCELLED:", appointmentId);
+      } else {
+        // hvis den ikke findes (fx kun cancel-workflow rammer), opret en "dummy" med cancelled
+        const dummyAppt = {
+          id: appointmentId,
+          clientName,
+          coachName,
+          startTime: startTime || new Date().toISOString(),
+          endTime: endTime || new Date().toISOString(),
+          durationMinutes: startTime && endTime ? getDurationMinutes(startTime, endTime) : undefined,
+          status: "cancelled"
+        };
+        appointments.push(dummyAppt);
+        console.log("Aflyst aftale oprettet som CANCELLED:", appointmentId);
+      }
+
+      return res.json({ success: true, cancelled: true });
     }
 
-    // Hvis der ikke er tider, kan vi ikke vise den (men den er ikke nødvendigvis aflyst)
+    // 2) Ikke aflyst → tilføj eller opdater normal aftale
     if (!startTime || !endTime) {
       console.log("Mangler startTime/endTime for ikke-aflyst aftale:", appointmentId);
       return res.status(400).json({
@@ -96,7 +134,8 @@ app.post("/ghl-webhook", (req, res) => {
       coachName,
       startTime,
       endTime,
-      durationMinutes
+      durationMinutes,
+      status: "active"
     };
 
     const index = appointments.findIndex((a) => a.id === appointmentId);
@@ -116,7 +155,7 @@ app.post("/ghl-webhook", (req, res) => {
 });
 
 /**
- * API – nu kun KOMMENDE aftaler
+ * API – kun KOMMENDE aftaler (både aktive og aflyste)
  */
 app.get("/api/appointments", (req, res) => {
   const now = new Date();
@@ -201,14 +240,15 @@ app.get("/display", (req, res) => {
         data.forEach((a) => {
           const s = new Date(a.startTime);
           const e = new Date(a.endTime);
+          const cancelled = a.status === "cancelled";
 
           rows += \`
-            <tr>
+            <tr style="color: \${cancelled ? '#ff6b6b' : 'white'};">
               <td>\${s.toLocaleDateString("da-DK")}</td>
               <td>\${s.toLocaleTimeString("da-DK")} - \${e.toLocaleTimeString("da-DK")}</td>
-              <td>\${a.clientName}</td>
+              <td>\${a.clientName} \${cancelled ? "(Aflyst)" : ""}</td>
               <td>\${a.coachName}</td>
-              <td>\${a.durationMinutes || ""} min</td>
+              <td>\${cancelled ? "<strong>Aflyst</strong>" : (a.durationMinutes || "") + " min"}</td>
             </tr>
           \`;
         });
@@ -242,3 +282,4 @@ app.get("/display", (req, res) => {
 app.listen(PORT, () => {
   console.log("Server kører på port " + PORT);
 });
+
