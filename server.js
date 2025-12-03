@@ -22,7 +22,6 @@ function getDurationMinutes(startISO, endISO) {
 
 /**
  * WEBHOOK fra GoHighLevel
- * Matcher din payload 1:1
  */
 app.post("/ghl-webhook", (req, res) => {
   const body = req.body;
@@ -40,12 +39,11 @@ app.post("/ghl-webhook", (req, res) => {
       body.contact_id; // fallback
 
     const startTime =
-      calendar.startTime || custom.startTime; // vi foretrækker calendar med dato
+      calendar.startTime || custom.startTime;
 
     const endTime =
       calendar.endTime || custom.endTime;
 
-    // Klientnavn – du har full_name tomt, så vi falder tilbage til email / contact_id
     const clientName =
       custom.clientName ||
       body.full_name ||
@@ -53,17 +51,40 @@ app.post("/ghl-webhook", (req, res) => {
       body.contact_id ||
       "Ukendt klient";
 
-    // Trænernavn – virker i din payload
     const coachName =
       custom.coachName ||
       user.firstName ||
       "Coach";
 
-    if (!appointmentId || !startTime || !endTime) {
-      console.log("Mangler felter. appointmentId:", appointmentId, "startTime:", startTime, "endTime:", endTime);
+    // Læs status (til at opdage aflysninger)
+    const rawStatus = String(
+      calendar.status ||
+      calendar.appoinmentStatus ||
+      body.status ||
+      ""
+    ).toLowerCase();
+
+    if (!appointmentId) {
+      console.log("Mangler appointmentId");
       return res.status(400).json({
         success: false,
-        message: "Webhook modtaget, men der mangler appointmentId/startTime/endTime."
+        message: "Webhook modtaget, men der mangler appointmentId."
+      });
+    }
+
+    // Hvis aftalen er aflyst → fjern den fra listen
+    if (rawStatus.includes("cancel")) {
+      appointments = appointments.filter((a) => a.id !== appointmentId);
+      console.log("Aftale AFSLYST og fjernet:", appointmentId, "status:", rawStatus);
+      return res.json({ success: true, removed: true });
+    }
+
+    // Hvis der ikke er tider, kan vi ikke vise den (men den er ikke nødvendigvis aflyst)
+    if (!startTime || !endTime) {
+      console.log("Mangler startTime/endTime for ikke-aflyst aftale:", appointmentId);
+      return res.status(400).json({
+        success: false,
+        message: "Webhook modtaget uden startTime/endTime."
       });
     }
 
@@ -95,11 +116,20 @@ app.post("/ghl-webhook", (req, res) => {
 });
 
 /**
- * API – lige nu viser vi ALLE aftaler (til debugging)
+ * API – nu kun KOMMENDE aftaler
  */
 app.get("/api/appointments", (req, res) => {
-  console.log("Sender appointments:", appointments);
-  res.json(appointments);
+  const now = new Date();
+
+  const upcoming = appointments
+    .filter((a) => {
+      const end = new Date(a.endTime);
+      return !isNaN(end.getTime()) && end >= now;
+    })
+    .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+
+  console.log("Sender upcoming appointments:", upcoming);
+  res.json(upcoming);
 });
 
 /**
@@ -212,4 +242,3 @@ app.get("/display", (req, res) => {
 app.listen(PORT, () => {
   console.log("Server kører på port " + PORT);
 });
-
