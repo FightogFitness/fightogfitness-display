@@ -375,18 +375,34 @@ app.get("/ads", (req, res) => {
   <html lang="da">
   <head>
     <meta charset="UTF-8" />
-    <title>FightogFitness Ads</title>
+    <title>FightogFitness Ads Video</title>
     <style>
-      body {
+      html, body {
         margin: 0;
-        font-family: system-ui, sans-serif;
-        background: #020617;
-        color: #f9fafb;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        height: 100vh;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
       }
+      iframe {
+        border: none;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <iframe
+      src="https://www.youtube.com/embed/2NeKXuz7g1g?autoplay=1&mute=1&loop=1&playlist=2NeKXuz7g1g&controls=0&modestbranding=1&rel=0&showinfo=0"
+      allow="autoplay; fullscreen"
+      allowfullscreen
+    ></iframe>
+  </body>
+  </html>
+  `;
+  res.send(html);
+});
+
       .slide-wrapper {
         max-width: 1200px;
         padding: 32px;
