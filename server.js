@@ -126,7 +126,7 @@ app.post("/ghl-webhook", (req, res) => {
       return res.json({ success: true, cancelled: true });
     }
 
-    // BOOK/OPDATER-FLOW (grøn/blå)
+    // BOOK/OPDATER-FLOW (aktiv)
     if (!startTime) {
       startTime = new Date().toISOString();
       console.log("Mangler startTime, bruger nu som fallback for:", appointmentId);
@@ -183,7 +183,7 @@ app.get("/api/appointments", (req, res) => {
 });
 
 /**
- * DISPLAY-side
+ * DISPLAY-side (PT-tavle)
  * - Blå rækker = aktive
  * - Røde rækker = aflyste
  * - Øverst: "Næste i ringen" kort for data[0]
@@ -290,7 +290,6 @@ app.get("/display", (req, res) => {
         const next = data[0];
         const rest = data.slice(1);
 
-        // Format-funktioner
         function fmtDate(d) {
           return d.toLocaleDateString("da-DK");
         }
@@ -358,6 +357,274 @@ app.get("/display", (req, res) => {
 
       loadAppointments();
       setInterval(loadAppointments, 20000);
+    </script>
+  </body>
+  </html>
+  `;
+
+  res.send(html);
+});
+
+/**
+ * ADS-side – 7 minutters blok med teknik, PT, Loyal+, events, CTA
+ * Kører som et simpelt tekst/slideshow, sound off, med undertekster.
+ */
+app.get("/ads", (req, res) => {
+  const html = `
+  <!DOCTYPE html>
+  <html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <title>FightogFitness Ads</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: #020617;
+        color: #f9fafb;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+      }
+      .slide-wrapper {
+        max-width: 1200px;
+        padding: 32px;
+        text-align: center;
+      }
+      .tag {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid #1d4ed8;
+        color: #bfdbfe;
+        font-size: 12px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        margin-bottom: 16px;
+      }
+      h1 {
+        font-size: 40px;
+        margin-bottom: 12px;
+      }
+      .subtitle {
+        font-size: 20px;
+        color: #e5e7eb;
+        margin-bottom: 24px;
+      }
+      ul {
+        list-style: none;
+        padding: 0;
+        margin: 0 auto 24px auto;
+        max-width: 700px;
+      }
+      li {
+        font-size: 20px;
+        margin-bottom: 8px;
+      }
+      .highlight {
+        color: #60a5fa;
+        font-weight: 600;
+      }
+      .cta {
+        margin-top: 8px;
+        font-size: 18px;
+        color: #bfdbfe;
+      }
+      .qr-placeholder {
+        margin-top: 16px;
+        display: inline-block;
+        width: 140px;
+        height: 140px;
+        border-radius: 12px;
+        border: 2px dashed #4b5563;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        color: #6b7280;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="slide-wrapper">
+      <div class="tag">FightogFitness</div>
+      <h1 id="title"></h1>
+      <div id="subtitle" class="subtitle"></div>
+      <ul id="bullets"></ul>
+      <div id="cta" class="cta"></div>
+      <div class="qr-placeholder">QR-kode til PT-priser / booking</div>
+    </div>
+
+    <script>
+      const slides = [
+        {
+          title: "Bokseteknik #1 · Jab",
+          subtitle: "Skru op for din teknik – selv uden lyd.",
+          bullets: [
+            "Stå let på fødderne, vægten lidt fremme",
+            "Skulderen løftes let og beskytter hagen",
+            "Slap af i hånden – spænd først i slaget",
+            "Træk hånden hurtigt hjem igen"
+          ],
+          cta: "Vil du være sikker på din teknik? Scan QR og se muligheder for personlig træning."
+        },
+        {
+          title: "Personlig Træning · 1:1 fokus",
+          subtitle: "Ignite · Rise · Thrive · Unstoppable",
+          bullets: [
+            "Ingen gætteri – en plan der passer til dig",
+            "Fokus på teknik, styrke og mentalitet",
+            "Skræddersyet forløb til din hverdag",
+            "Få mere energi, mindre fedt, mere power"
+          ],
+          cta: "Scan QR for priser og startforløb."
+        },
+        {
+          title: "Styrketræning · Squat Basics",
+          subtitle: "Byg et stærkt fundament.",
+          bullets: [
+            "Fødder i skulderbredde, tæer let udad",
+            "Knæ følger tæerne – ikke kollaps indad",
+            "Brystet op, spænd i maven",
+            "Tænk: ned i elevator – ikke fremover"
+          ],
+          cta: "Book PT for teknik-tjek på squat, dødløft og pres."
+        },
+        {
+          title: "Loyal+ · Belønning for dem der bliver",
+          subtitle: "Vi belønner dedikation.",
+          bullets: [
+            "6 måneder medlemskab → wraps",
+            "12 måneder → FightogFitness hoodie",
+            "24 måneder → eksklusiv Loyal+ pakke",
+            "Jo længere du bliver, jo mere får du"
+          ],
+          cta: "Spørg en træner om Loyal+ og dine nuværende fordele."
+        },
+        {
+          title: "Resultater fra virkeligheden",
+          subtitle: "Transformationer skabt i FightogFitness.",
+          bullets: [
+            "–9 kg på 12 uger med struktureret PT",
+            "Bedre søvn, mindre smerte, mere overskud",
+            "Stærkere krop og stærkere mindset",
+            "Det næste før/efter-billede kan være dit"
+          ],
+          cta: "Scan QR og ansøg om et forløb med personlig træning."
+        },
+        {
+          title: "Events & Community",
+          subtitle: "CHAOS CLASS · Temafester · Fællesskab.",
+          bullets: [
+            "Intense fællestræninger med høj energi",
+            "Sociale begivenheder udenfor træningen",
+            "Bliv en del af et hold, ikke bare et center",
+            "Hold øje med næste dato på vores opslag"
+          ],
+          cta: "Følg med på @fightogfitness for næste events."
+        },
+        {
+          title: "Klar til næste niveau?",
+          subtitle: "Du er kun ét valg fra at skrue op.",
+          bullets: [
+            "Personlig plan til din hverdag",
+            "Fast træner der følger dig tæt",
+            "Træning, teknik, kost og mindset samlet",
+            "Seriøse resultater for seriøse mennesker"
+          ],
+          cta: "Scan QR og start din rejse i dag."
+        }
+      ];
+
+      let currentIndex = 0;
+
+      function renderSlide(index) {
+        const slide = slides[index];
+        const titleEl = document.getElementById("title");
+        const subtitleEl = document.getElementById("subtitle");
+        const bulletsEl = document.getElementById("bullets");
+        const ctaEl = document.getElementById("cta");
+
+        titleEl.textContent = slide.title;
+        subtitleEl.textContent = slide.subtitle;
+        bulletsEl.innerHTML = "";
+        slide.bullets.forEach((b) => {
+          const li = document.createElement("li");
+          li.textContent = b;
+          bulletsEl.appendChild(li);
+        });
+        ctaEl.textContent = slide.cta;
+      }
+
+      renderSlide(currentIndex);
+      setInterval(() => {
+        currentIndex = (currentIndex + 1) % slides.length;
+        renderSlide(currentIndex);
+      }, 10000); // skift slide hver 10. sekund
+    </script>
+  </body>
+  </html>
+  `;
+
+  res.send(html);
+});
+
+/**
+ * TV-side – automatisk skift mellem /display og /ads
+ *
+ * Logik:
+ *  - Hver dag mellem 06:00 og 22:00:
+ *      - Minut 0-6  → /ads (reklamer)
+ *      - Minut 7-59 → /display (PT-tavle)
+ *  - Udenfor 06-22 → altid /display
+ */
+app.get("/tv", (req, res) => {
+  const html = `
+  <!DOCTYPE html>
+  <html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <title>FightogFitness TV</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+      }
+      iframe {
+        border: none;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <iframe id="frame" src="/display"></iframe>
+
+    <script>
+      function updateMode() {
+        const now = new Date();
+        const hour = now.getHours();
+        const minute = now.getMinutes();
+
+        const withinOpening = hour >= 6 && hour < 22;
+        const showAds = withinOpening && minute < 7;
+
+        const frame = document.getElementById("frame");
+        const current = frame.getAttribute("src");
+
+        if (showAds && current !== "/ads") {
+          frame.setAttribute("src", "/ads");
+        } else if (!showAds && current !== "/display") {
+          frame.setAttribute("src", "/display");
+        }
+      }
+
+      updateMode();
+      setInterval(updateMode, 15000); // tjek hvert 15. sekund
     </script>
   </body>
   </html>
