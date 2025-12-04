@@ -2,12 +2,12 @@ import express from "express";
 import cors from "cors";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 app.use(cors());
 app.use(express.json());
 
-// In-memory "database"
+// In-memory "database" for aftaler
 let appointments = [];
 
 /**
@@ -200,7 +200,7 @@ app.get("/display", (req, res) => {
       body {
         margin: 0;
         font-family: system-ui, sans-serif;
-        background: #020617; /* meget mørk blå */
+        background: #020617;
         color: #f9fafb;
       }
       .wrapper { padding: 32px; }
@@ -297,7 +297,6 @@ app.get("/display", (req, res) => {
           return d.toLocaleTimeString("da-DK", { hour: "2-digit", minute: "2-digit" });
         }
 
-        // NÆSTE I RINGEN kort
         const nextStart = new Date(next.startTime);
         const nextEnd = new Date(next.endTime);
         const nextCancelled = next.status === "cancelled";
@@ -313,7 +312,6 @@ app.get("/display", (req, res) => {
           </div>
         \`;
 
-        // Resten i tabel
         if (rest.length === 0) {
           content.innerHTML = "";
           return;
@@ -325,7 +323,7 @@ app.get("/display", (req, res) => {
           const e = new Date(a.endTime);
           const cancelled = a.status === "cancelled";
 
-          const bgColor = cancelled ? "#7f1d1d" : "#1d4ed8"; // rød / blå
+          const bgColor = cancelled ? "#7f1d1d" : "#1d4ed8";
           const statusLabel = cancelled ? "Aflyst" : (a.durationMinutes || "") + " min";
 
           rows += \`
@@ -366,8 +364,7 @@ app.get("/display", (req, res) => {
 });
 
 /**
- * ADS-side – 7 minutters blok med teknik, PT, Loyal+, events, CTA
- * Kører som et simpelt tekst/slideshow, sound off, med undertekster.
+ * ADS-side – YouTube-video i fuld skærm
  */
 app.get("/ads", (req, res) => {
   const html = `
@@ -400,39 +397,6 @@ app.get("/ads", (req, res) => {
   </body>
   </html>
   `;
-  res.send(html);
-});
-
-
-      let currentIndex = 0;
-
-      function renderSlide(index) {
-        const slide = slides[index];
-        const titleEl = document.getElementById("title");
-        const subtitleEl = document.getElementById("subtitle");
-        const bulletsEl = document.getElementById("bullets");
-        const ctaEl = document.getElementById("cta");
-
-        titleEl.textContent = slide.title;
-        subtitleEl.textContent = slide.subtitle;
-        bulletsEl.innerHTML = "";
-        slide.bullets.forEach((b) => {
-          const li = document.createElement("li");
-          li.textContent = b;
-          bulletsEl.appendChild(li);
-        });
-        ctaEl.textContent = slide.cta;
-      }
-
-      renderSlide(currentIndex);
-      setInterval(() => {
-        currentIndex = (currentIndex + 1) % slides.length;
-        renderSlide(currentIndex);
-      }, 10000); // skift slide hver 10. sekund
-    </script>
-  </body>
-  </html>
-  `;
 
   res.send(html);
 });
@@ -440,8 +404,7 @@ app.get("/ads", (req, res) => {
 /**
  * TV-side – automatisk skift mellem /display og /ads
  *
- * Logik:
- *  - Hver dag mellem 06:00 og 22:00:
+ *  - 06:00–22:00:
  *      - Minut 0-6  → /ads (reklamer)
  *      - Minut 7-59 → /display (PT-tavle)
  *  - Udenfor 06-22 → altid /display
@@ -491,7 +454,7 @@ app.get("/tv", (req, res) => {
       }
 
       updateMode();
-      setInterval(updateMode, 15000); // tjek hvert 15. sekund
+      setInterval(updateMode, 15000);
     </script>
   </body>
   </html>
@@ -503,3 +466,4 @@ app.get("/tv", (req, res) => {
 app.listen(PORT, () => {
   console.log("Server kører på port " + PORT);
 });
+
