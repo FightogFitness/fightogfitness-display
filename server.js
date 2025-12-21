@@ -390,7 +390,7 @@ app.get("/ads", (req, res) => {
   </head>
   <body>
     <iframe
-      src="https://www.youtube.com/embed/2NeKXuz7g1g?autoplay=1&mute=1&loop=1&playlist=2NeKXuz7g1g&controls=0&modestbranding=1&rel=0&showinfo=0"
+      src="https://www.youtube.com/watch?v=XzsPWBlKDBU"
       allow="autoplay; fullscreen"
       allowfullscreen
     ></iframe>
