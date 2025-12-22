@@ -367,6 +367,8 @@ app.get("/display", (req, res) => {
  * ADS-side – YouTube-video i fuld skærm
  */
 app.get("/ads", (req, res) => {
+  const videoId = "XzsPWBlKDBU"; // <-- din nye video-id
+
   const html = `
   <!DOCTYPE html>
   <html lang="da">
@@ -390,13 +392,17 @@ app.get("/ads", (req, res) => {
   </head>
   <body>
     <iframe
-      src="https://www.youtube.com/watch?v=XzsPWBlKDBU"
+      src="https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=0&modestbranding=1&rel=0"
       allow="autoplay; fullscreen"
       allowfullscreen
     ></iframe>
   </body>
   </html>
   `;
+
+  res.send(html);
+});
+
 
   res.send(html);
 });
