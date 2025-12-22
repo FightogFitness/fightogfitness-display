@@ -117,10 +117,13 @@ app.post("/ghl-webhook", (req, res) => {
           startTime: dummyStart,
           endTime: dummyEnd,
           durationMinutes: getDurationMinutes(dummyStart, dummyEnd),
-          status: "cancelled"
+          status: "cancelled",
         };
         appointments.push(dummyAppt);
-        console.log("Aflyst aftale oprettet som CANCELLED (dummy tider):", appointmentId);
+        console.log(
+          "Aflyst aftale oprettet som CANCELLED (dummy tider):",
+          appointmentId
+        );
       }
 
       return res.json({ success: true, cancelled: true });
@@ -145,7 +148,7 @@ app.post("/ghl-webhook", (req, res) => {
       startTime,
       endTime,
       durationMinutes,
-      status: "active"
+      status: "active",
     };
 
     if (index >= 0) {
@@ -367,7 +370,7 @@ app.get("/display", (req, res) => {
  * ADS-side – YouTube-video i fuld skærm
  */
 app.get("/ads", (req, res) => {
-  const videoId = "XzsPWBlKDBU"; // <-- din nye video-id
+  const videoId = "XzsPWBlKDBU"; // <-- din nye video-id (kun selve ID'et)
 
   const html = `
   <!DOCTYPE html>
@@ -399,10 +402,6 @@ app.get("/ads", (req, res) => {
   </body>
   </html>
   `;
-
-  res.send(html);
-});
-
 
   res.send(html);
 });
@@ -472,4 +471,3 @@ app.get("/tv", (req, res) => {
 app.listen(PORT, () => {
   console.log("Server kører på port " + PORT);
 });
-
